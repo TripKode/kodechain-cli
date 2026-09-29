@@ -1,0 +1,91 @@
+# Release: tag `vX.Y.Z` → builds kdc for Linux + Windows → attaches
+# assets to the GitHub Release. No binaries are ever committed.
+#
+# Cut a release (maintainer):
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# Assets produced:
+#   kdc-linux-amd64                  (Linux x86_64 binary, chmod +x and run)
+#   kdc-windows-x86_64-vX.Y.Z.zip    (kdc.exe + README.md, unzip and run)
+#
+# The tag MUST match Cargo.toml (v0.1.0 ↔ version = "0.1.0"); the
+# release job fails otherwise.
+
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Offline tests (unit + CLI, no node)
+        run: |
+          cargo test --locked --lib 2>&1 | tail -n 1
+          cargo test --locked --test cli 2>&1 | tail -n 1
+      - name: Build release binary
+        run: cargo build --locked --release
+      - name: Stage asset
+        run: |
+          mkdir -p dist
+          cp target/release/kdc dist/kdc-linux-amd64
+          chmod +x dist/kdc-linux-amd64
+          ./dist/kdc-linux-amd64 --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kdc-linux-amd64
+          path: dist/kdc-linux-amd64
+
+  windows:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-xwin
+        run: cargo install cargo-xwin
+      - name: Build Windows x86_64 (MSVC, rustls — no OpenSSL)
+        run: cargo xwin build --locked --release --target x86_64-pc-windows-msvc
+      - name: Stage zip (kdc.exe + README.md)
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          DIST="kdc-windows-x86_64-v$VER"
+          rm -rf "$DIST" "$DIST.zip"
+          mkdir -p "$DIST"
+          cp target/x86_64-pc-windows-msvc/release/kdc.exe "$DIST/"
+          cp README.md "$DIST/"
+          (cd "$DIST" && sha256sum kdc.exe README.md > SHA256SUMS.txt)
+          zip -r -q "$DIST.zip" "$DIST"
+          ls -la "$DIST.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kdc-windows-zip
+          path: kdc-windows-x86_64-*.zip
+
+  release:
+    needs: [linux, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag matches Cargo.toml
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          CARGO="$(grep '^version' Cargo.toml | head -n 1 | cut -d'"' -f2)"
+          [ "$TAG" = "$CARGO" ] || { echo "tag v$TAG != Cargo.toml $CARGO"; exit 1; }
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/kdc-linux-amd64/kdc-linux-amd64
+            dist/kdc-windows-zip/kdc-windows-x86_64-*.zip
+          generate_release_notes: true

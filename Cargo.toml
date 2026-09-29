@@ -1,0 +1,30 @@
+[package]
+name = "kodechain-cli"
+version = "0.1.0"
+edition = "2021"
+description = "kdc — CLI for the KodeChain testnet: run nodes, manage wallets, submit transactions (post-quantum: QSH + ML-DSA-65)"
+license = "MIT"
+
+[[bin]]
+name = "kdc"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive", "wrap_help", "env"] }
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-native-roots"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+ml-dsa = "0.1"
+rand = "0.10"
+hex = "0.4"
+dirs = "5"
+tabled = "0.18"
+libc = "0.2.189"
+sha3 = "0.10.8"
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"
+tokio = { version = "1", features = ["full"] }

@@ -1,0 +1,25 @@
+# Rust build output
+/target/
+
+# Dist artifacts — built by CI on version tags, never committed.
+# (Reproduce locally: ./dist-windows.sh, cargo build --release)
+kdc-windows-x86_64-*.zip
+kdc-windows-x86_64-v*/
+kdc-linux-*
+
+# Ephemeral test state
+kdc.pid
+/tmp/kdc-*/
+
+# Keystore / registry accidents — never commit keys
+wallets.json
+nodes.json
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+desktop.ini
+Thumbs.db
