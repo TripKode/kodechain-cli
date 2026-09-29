@@ -8,6 +8,8 @@ cd "$(dirname "$0")"
 export PATH="$HOME/.cargo/bin:$PATH"
 
 echo "==> 1/3 build Windows x86_64 (release)"
+rustup target list --installed | grep -q "x86_64-pc-windows-msvc" \
+    || rustup target add x86_64-pc-windows-msvc
 cargo xwin build --release --target x86_64-pc-windows-msvc
 
 EXE="target/x86_64-pc-windows-msvc/release/kdc.exe"

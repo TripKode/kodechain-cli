@@ -64,6 +64,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
       - name: Install cargo-xwin
         run: cargo install cargo-xwin
       - name: Build Windows x86_64 (MSVC, rustls — no OpenSSL)
