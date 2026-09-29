@@ -1,28 +1,42 @@
-# Release: tag `vX.Y.Z` → builds kdc for Linux + Windows → attaches
-# assets to the GitHub Release. No binaries are ever committed.
+# Release: every push to master builds kdc for Linux + Windows and
+# creates/updates the GitHub Release for the Cargo.toml version.
+# No binaries are ever committed, no manual tagging needed.
 #
-# Cut a release (maintainer):
-#   git tag v0.1.0 && git push origin v0.1.0
+#   git push origin master
+#   → prep (read version) → linux + windows builds → Release vX.Y.Z
+#      with kdc-linux-amd64 + kdc-windows-x86_64-vX.Y.Z.zip
 #
-# Assets produced:
-#   kdc-linux-amd64                  (Linux x86_64 binary, chmod +x and run)
-#   kdc-windows-x86_64-vX.Y.Z.zip    (kdc.exe + README.md, unzip and run)
-#
-# The tag MUST match Cargo.toml (v0.1.0 ↔ version = "0.1.0"); the
-# release job fails otherwise.
+# New version = bump `version` in Cargo.toml and push. Re pushing the
+# same version just refreshes that release's assets (tag is moved to
+# the latest commit). Manual re-run: Actions → release → Run workflow.
 
 name: release
 
 on:
   push:
-    tags:
-      - "v*"
+    branches: [master]
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
+  prep:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      tag: ${{ steps.v.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        run: |
+          VER="$(grep '^version' Cargo.toml | head -n 1 | cut -d'"' -f2)"
+          [ -n "$VER" ] || { echo "no version in Cargo.toml"; exit 1; }
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VER" >> "$GITHUB_OUTPUT"
+
   linux:
+    needs: prep
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -45,6 +59,7 @@ jobs:
           path: dist/kdc-linux-amd64
 
   windows:
+    needs: prep
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -55,7 +70,7 @@ jobs:
         run: cargo xwin build --locked --release --target x86_64-pc-windows-msvc
       - name: Stage zip (kdc.exe + README.md)
         run: |
-          VER="${GITHUB_REF_NAME#v}"
+          VER="${{ needs.prep.outputs.version }}"
           DIST="kdc-windows-x86_64-v$VER"
           rm -rf "$DIST" "$DIST.zip"
           mkdir -p "$DIST"
@@ -70,21 +85,21 @@ jobs:
           path: kdc-windows-x86_64-*.zip
 
   release:
-    needs: [linux, windows]
+    needs: [prep, linux, windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Tag matches Cargo.toml
+      - name: Move version tag to this commit
         run: |
-          TAG="${GITHUB_REF_NAME#v}"
-          CARGO="$(grep '^version' Cargo.toml | head -n 1 | cut -d'"' -f2)"
-          [ "$TAG" = "$CARGO" ] || { echo "tag v$TAG != Cargo.toml $CARGO"; exit 1; }
+          git tag -f "${{ needs.prep.outputs.tag }}"
+          git push -f origin "${{ needs.prep.outputs.tag }}"
       - uses: actions/download-artifact@v4
         with:
           path: dist
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.prep.outputs.tag }}
           files: |
             dist/kdc-linux-amd64/kdc-linux-amd64
             dist/kdc-windows-zip/kdc-windows-x86_64-*.zip

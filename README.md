@@ -223,17 +223,20 @@ cargo test            # 30 unit + 13 CLI + 5 live-integration (48 total)
 
 ## Releases (maintainers)
 
-Binaries are never committed — CI builds them when you push a version tag:
+Binaries are never committed — every push to `master` builds and
+publishes them automatically:
 
 ```bash
-git tag v0.1.0 && git push origin v0.1.0
+git push origin master
 # → .github/workflows/release.yml: offline tests → Linux + Windows
-#   builds → GitHub Release with kdc-linux-amd64 +
-#   kdc-windows-x86_64-v0.1.0.zip (kdc.exe + README.md + SHA256SUMS.txt)
+#   builds → GitHub Release vX.Y.Z (version from Cargo.toml) with
+#   kdc-linux-amd64 + kdc-windows-x86_64-vX.Y.Z.zip
+#   (kdc.exe + README.md + SHA256SUMS.txt)
 ```
 
-Rules: the tag must match `Cargo.toml` (`v0.1.0` ↔ `version = "0.1.0"`,
-checked in CI — mismatch fails the release job). To reproduce the
-Windows zip locally: `./dist-windows.sh` (needs `cargo install
-cargo-xwin`; MSVC toolchain is downloaded automatically, no sudo or
-Visual Studio).
+New version = bump `version` in `Cargo.toml` and push. Pushing again
+on the same version just refreshes that release's assets (the `vX.Y.Z`
+tag is moved to the latest commit). Manual re-run without pushing:
+Actions → release → Run workflow. To reproduce the Windows zip
+locally: `./dist-windows.sh` (needs `cargo install cargo-xwin`; MSVC
+toolchain is downloaded automatically, no sudo or Visual Studio).
