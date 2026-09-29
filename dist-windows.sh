@@ -10,6 +10,16 @@ export PATH="$HOME/.cargo/bin:$PATH"
 echo "==> 1/3 build Windows x86_64 (release)"
 rustup target list --installed | grep -q "x86_64-pc-windows-msvc" \
     || rustup target add x86_64-pc-windows-msvc
+# ring (C code, vía rustls) necesita el archivador llvm-lib en el PATH
+if ! command -v llvm-lib >/dev/null 2>&1; then
+    BIN="$(ls /usr/bin/llvm-lib-* 2>/dev/null | sort -V | tail -n 1 || true)"
+    if [ -n "$BIN" ]; then
+        ln -sf "$BIN" "$HOME/.cargo/bin/llvm-lib"
+        echo "    (enlazado $BIN → ~/.cargo/bin/llvm-lib)"
+    else
+        echo "    ⚠️  falta 'llvm-lib' (lo necesita el crate ring): sudo apt-get install -y llvm"
+    fi
+fi
 cargo xwin build --release --target x86_64-pc-windows-msvc
 
 EXE="target/x86_64-pc-windows-msvc/release/kdc.exe"

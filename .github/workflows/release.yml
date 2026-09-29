@@ -68,6 +68,16 @@ jobs:
           targets: x86_64-pc-windows-msvc
       - name: Install cargo-xwin
         run: cargo install cargo-xwin
+      - name: Install LLVM (llvm-lib archiver for ring C code under xwin)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm clang
+          # cc-rs looks for unversioned `llvm-lib` on PATH; Ubuntu ships
+          # version-suffixed binaries (/usr/bin/llvm-lib-18)
+          BIN="$(ls /usr/bin/llvm-lib-* 2>/dev/null | sort -V | tail -n 1)"
+          [ -n "$BIN" ] || { echo "llvm-lib not found after apt install llvm"; exit 1; }
+          sudo ln -sf "$BIN" /usr/local/bin/llvm-lib
+          llvm-lib --version 2>/dev/null | head -n 1 || true
       - name: Build Windows x86_64 (MSVC, rustls — no OpenSSL)
         run: cargo xwin build --locked --release --target x86_64-pc-windows-msvc
       - name: Stage zip (kdc.exe + README.md)
