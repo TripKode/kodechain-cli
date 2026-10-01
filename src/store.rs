@@ -32,7 +32,7 @@ pub fn load() -> Result<Vec<SavedWallet>> {
     serde_json::from_str(&raw).context("corrupt wallets.json")
 }
 
-fn save_all(list: &[SavedWallet]) -> Result<()> {
+pub fn save_all(list: &[SavedWallet]) -> Result<()> {
     let p = path()?;
     write_private_json(&p, list)
 }
@@ -69,14 +69,18 @@ pub fn add(w: SavedWallet) -> Result<()> {
     save_all(&list)
 }
 
-pub fn find(name_or_addr: &str) -> Result<SavedWallet> {
+pub fn find_in(list: &[SavedWallet], name_or_addr: &str) -> Result<SavedWallet> {
     let needle = name_or_addr.to_lowercase();
-    for w in load()? {
+    for w in list {
         if w.name == name_or_addr || w.address.to_lowercase() == needle {
-            return Ok(w);
+            return Ok(w.clone());
         }
     }
-    anyhow::bail!("wallet '{name_or_addr}' not in keystore (kdc wallet list)")
+    anyhow::bail!("wallet '{}' no encontrada en el keystore", name_or_addr)
+}
+
+pub fn find(name_or_addr: &str) -> Result<SavedWallet> {
+    find_in(&load()?, name_or_addr)
 }
 
 #[cfg(test)]

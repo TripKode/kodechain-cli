@@ -198,3 +198,59 @@ fn compose_renders_n_validators() {
     assert!(!yml.contains("bootstrap:"), "mainnet has no bootstrap service");
     std::fs::remove_dir_all(dir).ok();
 }
+
+#[test]
+fn node_start_exposes_genesis_overrides() {
+    kdc()
+        .args(["node", "start", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--genesis-dpos"))
+        .stdout(predicate::str::contains("--genesis-pbft"));
+}
+
+#[test]
+fn wallet_export_import_keystore_roundtrip() {
+    let dir = "/tmp/kdc-keystore-e2e";
+    std::fs::remove_dir_all(dir).ok();
+    std::fs::create_dir_all(dir).unwrap();
+    let ks = format!("{dir}/demo.keystore.json");
+    // crear + exportar cifrado
+    kdc().env("KDC_HOME", dir)
+        .args(["wallet", "new", "--name", "ksdemo"])
+        .assert().success();
+    kdc().env("KDC_HOME", dir)
+        .args(["wallet", "export", "--name", "ksdemo", "--out", &ks])
+        .pipe_stdin(stdin_file(dir, "ClaveFuerte123\n")).unwrap()
+        .assert().success().stdout(predicate::str::contains("keystore exportado"));
+    // el archivo NO contiene la seed en claro
+    let raw = std::fs::read_to_string(&ks).unwrap();
+    let seed_hex = {
+        let s = kdc().env("KDC_HOME", dir)
+            .args(["wallet", "list", "--json"]).output().unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&s.stdout).unwrap();
+        let ws = v.get("wallets").and_then(|w| w.as_array()).unwrap();
+        ws[0].get("key_hex").unwrap().as_str().unwrap().to_string()
+    };
+    assert!(!raw.contains(&seed_hex), "¡seed en claro dentro del keystore!");
+    assert!(raw.contains("\"aes-256-gcm\""));
+    // importar con contraseña correcta en un keystore DISTINTO
+    let dir2 = format!("{dir}/inversor");
+    std::fs::create_dir_all(&dir2).unwrap();
+    kdc().env("KDC_HOME", &dir2)
+        .args(["wallet", "import-keystore", &ks])
+        .pipe_stdin(stdin_file(dir, "ClaveFuerte123\n")).unwrap()
+        .assert().success().stdout(predicate::str::contains("wallet importada"));
+    // importar con contraseña errada: aborta
+    kdc().env("KDC_HOME", &dir2)
+        .args(["wallet", "import-keystore", &ks, "--name", "nope"])
+        .pipe_stdin(stdin_file(dir, "mala\n")).unwrap()
+        .assert().failure().stderr(predicate::str::contains("contraseña incorrecta"));
+    std::fs::remove_dir_all(dir).ok();
+}
+
+fn stdin_file(dir: &str, content: &str) -> String {
+    let p = format!("{dir}/stdin.txt");
+    std::fs::write(&p, content).unwrap();
+    p
+}

@@ -77,6 +77,8 @@ pub struct StartParams {
     pub p2p_port: Option<u16>,
     pub udp_port: Option<u16>,
     pub data_dir: Option<PathBuf>,
+    pub genesis_dpos: Option<String>,
+    pub genesis_pbft: Option<String>,
 }
 
 /// Pure offline validation: mainnet deploys validators only (the protocol
@@ -204,6 +206,14 @@ impl NodeSet {
             "-data_dir".into(),
             data_dir.display().to_string(),
         ];
+        if let Some(g) = &p.genesis_dpos {
+            args.push("-genesis-dpos".into());
+            args.push(g.clone());
+        }
+        if let Some(g) = &p.genesis_pbft {
+            args.push("-genesis-pbft".into());
+            args.push(g.clone());
+        }
         let mut envs: Vec<(String, String)> = vec![
             ("BEACON_BLOCK_INTERVAL".into(), self.beacon_interval.clone()),
             ("KODECHAIN_BIDIR_SYNC".into(), self.bidir_sync.clone()),

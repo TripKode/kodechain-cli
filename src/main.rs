@@ -6,11 +6,13 @@ use kodechain_cli::client;
 use kodechain_cli::compose;
 use kodechain_cli::config;
 use kodechain_cli::genesis;
+use kodechain_cli::keystore;
 use kodechain_cli::manual;
 use kodechain_cli::node;
 use kodechain_cli::output;
 use kodechain_cli::setup;
 use kodechain_cli::store;
+use kodechain_cli::store_encrypted;
 use kodechain_cli::wallet_crypto;
 
 use anyhow::{Context, Result};
@@ -118,12 +120,28 @@ enum Cmd {
         /// Bootstrap enode (mainnet required; testnet auto-built)
         #[arg(long)]
         bootstrap_nodes: Option<String>,
+        /// Bootstrap wallet override (testnet default: Testnet_Faucet)
+        #[arg(long)]
+        bootstrap_id: Option<String>,
         /// Output file
         #[arg(long, default_value = "docker-compose.yml")]
         output: String,
         /// Engine checkout used as compose build context
         #[arg(long, default_value = ".")]
         context: String,
+        /// DPOS genesis path inside containers (empty = network default)
+        #[arg(long, default_value = "")]
+        genesis_dpos: String,
+        /// PBFT genesis path inside containers (empty = network default)
+        #[arg(long, default_value = "")]
+        genesis_pbft: String,
+        /// Use prebuilt Dockerfiles (needs static kodechain-node-validator in context, no compile)
+        #[arg(long, default_value_t = false)]
+        prebuilt: bool,
+        /// [mainnet only] Render the protocol bootstrap service too (you ARE
+        /// the protocol operator). Requires --bootstrap-id.
+        #[arg(long, default_value_t = false)]
+        with_bootstrap: bool,
     },
     /// Show resolved configuration
     Config,
@@ -176,6 +194,12 @@ enum NodeOp {
         /// Data dir override (defaults: archive-testnet/... or data-mainnet-...)
         #[arg(long)]
         data_dir: Option<String>,
+        /// DPOS genesis override (rehearsals with custom allocs)
+        #[arg(long)]
+        genesis_dpos: Option<String>,
+        /// PBFT genesis override (rehearsals with custom allocs)
+        #[arg(long)]
+        genesis_pbft: Option<String>,
     },
     /// Stop nodes
     Stop {
@@ -230,6 +254,27 @@ enum WalletOp {
     },
     /// Movements of an address on both chains
     History { address: String },
+    /// Export one wallet as an encrypted KDC-Keystore v1 JSON (password-protected)
+    Export {
+        /// Keystore wallet name (or address)
+        #[arg(long)]
+        name: String,
+        /// Output file (default: <name>.keystore.json)
+        #[arg(long)]
+        out: Option<String>,
+    },
+    /// Encrypt the local keystore (wallets.json → wallets.json.enc)
+    Lock,
+    /// Decrypt back to plaintext (migrating machines)
+    Unlock,
+    /// Import a KDC-Keystore v1 JSON (verifies address matches derived seed)
+    ImportKeystore {
+        /// Path to the keystore JSON file
+        file: String,
+        /// Save into local keystore under this name (default: name from file)
+        #[arg(long)]
+        name: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -264,7 +309,7 @@ fn engine(cli: &Cli) -> Result<Engine> {
 }
 
 fn resolve_addr(s: &str) -> String {
-    match store::find(s) {
+    match store_encrypted::find_any(s) {
         Ok(w) => w.address,
         Err(_) => s.to_string(),
     }
@@ -301,7 +346,7 @@ async fn main() -> Result<()> {
 
     match &cli.cmd {
         Cmd::Manual { topic } => manual::show(topic.as_deref()),
-        Cmd::Compose { dpos, pbft, dpos_ids, pbft_ids, bootstrap_nodes, output, context } => {
+        Cmd::Compose { dpos, pbft, dpos_ids, pbft_ids, bootstrap_nodes, bootstrap_id, output, context, genesis_dpos, genesis_pbft, prebuilt, with_bootstrap } => {
             async fn resolve_ids(prefix: &str, want: usize, given: &str) -> Result<Vec<String>> {
                 let mut ids: Vec<String> = given
                     .split(',')
@@ -310,7 +355,7 @@ async fn main() -> Result<()> {
                     .collect();
                 ids = ids
                     .into_iter()
-                    .map(|x| match store::find(&x) {
+                    .map(|x| match store_encrypted::find_any(&x) {
                         Ok(w) => w.address,
                         Err(_) => x,
                     })
@@ -321,7 +366,7 @@ async fn main() -> Result<()> {
                     let seed = wallet_crypto::random_seed();
                     let addr = wallet_crypto::address_for_seed(&seed);
                     let name = format!("{prefix}-{n}");
-                    if store::find(&name).is_ok() {
+                    if store_encrypted::find_any(&name).is_ok() {
                         continue;
                     }
                     store::add(store::SavedWallet {
@@ -347,9 +392,19 @@ async fn main() -> Result<()> {
                 context: context.clone(),
                 beacon_interval: std::env::var("KODECHAIN_BEACON_INTERVAL").unwrap_or_else(|_| "5".into()),
                 bidir_sync: std::env::var("KODECHAIN_BIDIR_SYNC").unwrap_or_else(|_| "30s".into()),
+                genesis_dpos: genesis_dpos.clone(),
+                genesis_pbft: genesis_pbft.clone(),
+                prebuilt: *prebuilt,
+                with_bootstrap: *with_bootstrap,
             };
-            let boot_id = if cli.network == "mainnet" {
+            let boot_id = if cli.network == "mainnet" && !*with_bootstrap {
                 None
+            } else if let Some(id) = bootstrap_id.clone() {
+                let addr = match store::find(&id) {
+                    Ok(w) => w.address,
+                    Err(_) => id,
+                };
+                Some(addr)
             } else {
                 let engine_dir = config::resolve_engine_dir(cli.engine_dir.as_deref())?;
                 let txt = std::fs::read_to_string(engine_dir.join("archives/genesis_testnet_accounts.txt"))?;
@@ -752,6 +807,8 @@ async fn node_cmd(cli: &Cli, op: &NodeOp, out_json: bool) -> Result<()> {
             p2p_port,
             udp_port,
             data_dir,
+            genesis_dpos,
+            genesis_pbft,
         } => {
             let params = node::StartParams {
                 network: cli.network.clone(),
@@ -762,6 +819,8 @@ async fn node_cmd(cli: &Cli, op: &NodeOp, out_json: bool) -> Result<()> {
                 p2p_port: *p2p_port,
                 udp_port: *udp_port,
                 data_dir: data_dir.clone().map(std::path::PathBuf::from),
+                genesis_dpos: genesis_dpos.clone(),
+                genesis_pbft: genesis_pbft.clone(),
             };
             for m in modes(mode)? {
                 match ns.start(m, &params).await {
@@ -895,7 +954,7 @@ async fn wallet_cmd(cli: &Cli, op: &WalletOp, out_json: bool) -> Result<()> {
                 created_at: chrono_now(),
             };
             if *save {
-                store::add(rec.clone())?;
+                store_encrypted::add_any(rec.clone())?;
             }
             if !j(
                 &serde_json::json!({"address": rec.address, "public_key": rec.public_key, "seed": rec.key_hex}),
@@ -928,13 +987,13 @@ async fn wallet_cmd(cli: &Cli, op: &WalletOp, out_json: bool) -> Result<()> {
                 key_format: fmt.into(),
                 created_at: chrono_now(),
             };
-            store::add(rec.clone())?;
+            store_encrypted::add_any(rec.clone())?;
             if !j(&serde_json::json!({"address": rec.address, "format": fmt})) {
                 output::ok(&format!("imported {addr} [{fmt}] (saved)"));
             }
         }
         WalletOp::List => {
-            let list = store::load()?;
+            let list = store_encrypted::load_any()?;
             if !j(&serde_json::json!({ "wallets": list })) {
                 use tabled::Tabled;
                 #[derive(Tabled)]
@@ -996,6 +1055,93 @@ async fn wallet_cmd(cli: &Cli, op: &WalletOp, out_json: bool) -> Result<()> {
                     "signature (ML-DSA-65, 3309 B)".into(),
                     hex::encode(&sig),
                 )]);
+            }
+        }
+        WalletOp::Lock => {
+            eprint!("Contraseña para el store cifrado (mínimo 8): ");
+            std::io::Write::flush(&mut std::io::stderr()).ok();
+            let mut pass = String::new();
+            std::io::stdin().read_line(&mut pass)?;
+            let pass = pass.trim();
+            if pass.len() < 8 {
+                anyhow::bail!("contraseña demasiado corta (mínimo 8)");
+            }
+            eprint!("Repite la contraseña: ");
+            std::io::Write::flush(&mut std::io::stderr()).ok();
+            let mut pass2 = String::new();
+            std::io::stdin().read_line(&mut pass2)?;
+            if pass != pass2.trim() {
+                anyhow::bail!("las contraseñas no coinciden — nada fue cifrado");
+            }
+            let n = store_encrypted::lock(pass)?;
+            if !j(&serde_json::json!({"locked": true, "wallets": n})) {
+                output::ok(&format!("store cifrado: {n} wallets → wallets.json.enc (plaintext sobreescrito y borrado)"));
+                output::info("Los comandos pedirán esta contraseña (o exportar KDC_STORE_PASS para scripts).");
+            }
+        }
+        WalletOp::Unlock => {
+            let pass = store_encrypted::ask_store_password()?;
+            let n = store_encrypted::unlock(&pass)?;
+            if !j(&serde_json::json!({"locked": false, "wallets": n})) {
+                output::ok(&format!("store descifrado: {n} wallets → wallets.json (plaintext)"));
+                output::info("⚠️  wallets.json está ahora en claro: recuérdalo y vuelve a lock cuando termines.");
+            }
+        }
+        WalletOp::Export { name, out } => {
+            // wallet export: cifrado con contraseña por stdin (nunca argv/echo)
+            let w = store_encrypted::find_any(&name).map_err(|_| anyhow::anyhow!("wallet '{name}' no encontrada en keystore"))?;
+            if w.key_format != "seed" {
+                anyhow::bail!("export solo soporta wallets formato seed (la de '{name}' es {}); conviértela primero", w.key_format);
+            }
+            eprint!("Contraseña de cifrado (keystore del inversor): ");
+            std::io::Write::flush(&mut std::io::stderr()).ok();
+            let mut pass = String::new();
+            std::io::stdin().read_line(&mut pass)?;
+            let pass = pass.trim();
+            if pass.len() < 8 {
+                anyhow::bail!("contraseña demasiado corta (mínimo 8 caracteres)");
+            }
+            let seed_bytes = hex::decode(&w.key_hex)?;
+            let seed: [u8; 32] = seed_bytes.as_slice().try_into()
+                .map_err(|_| anyhow::anyhow!("seed de {} no es de 32 bytes", w.name))?;
+            let ks = keystore::encrypt_seed(&seed, &w.name, &w.address, &w.public_key, pass)?;
+            let out = out.clone().unwrap_or_else(|| format!("{}.keystore.json", w.name));
+            std::fs::write(&out, serde_json::to_vec_pretty(&ks)?)?;
+            if !j(&serde_json::json!({"exported": out, "address": w.address})) {
+                output::ok(&format!("keystore exportado: {out}"));
+                output::info("El archivo viaja cifrado (scrypt+AES-GCM). Sin la contraseña, no sirve a nadie.");
+            }
+        }
+        WalletOp::ImportKeystore { file, name } => {
+            let raw = std::fs::read_to_string(&file)
+                .with_context(|| format!("no se pudo leer {file}"))?;
+            let ks: keystore::KeystoreFile = serde_json::from_str(&raw)
+                .with_context(|| format!("formato keystore inválido en {file}"))?;
+            eprint!("Contraseña del keystore: ");
+            std::io::Write::flush(&mut std::io::stderr()).ok();
+            let mut pass = String::new();
+            std::io::stdin().read_line(&mut pass)?;
+            let pass = pass.trim();
+            let seed = keystore::decrypt_seed(&ks, pass)?;
+            // Verificación criptográfica: la seed DERIVA el address del archivo
+            let seed_arr: [u8; 32] = seed.as_ref().try_into()
+                .map_err(|_| anyhow::anyhow!("longitud de seed inválida"))?;
+            let derived = wallet_crypto::address_for_seed(&seed_arr);
+            if !derived.eq_ignore_ascii_case(&ks.address) {
+                anyhow::bail!("address derivada de la seed ({derived}) ≠ address del archivo ({}) — archivo adulterado o corrupto: NO se guarda nada", ks.address);
+            }
+            let rec = store::SavedWallet {
+                name: name.clone().unwrap_or_else(|| ks.name.clone()),
+                address: ks.address.clone(),
+                public_key: ks.public_key.clone(),
+                key_hex: hex::encode(seed_arr),
+                key_format: "seed".into(),
+                created_at: chrono_now(),
+            };
+            store_encrypted::add_any(rec.clone())?;
+            if !j(&serde_json::json!({"imported": rec.address, "name": rec.name})) {
+                output::ok(&format!("wallet importada: {} ({})", rec.name, rec.address));
+                output::info("Verificada: la seed deriva exactamente el address del archivo (QSH_KDC-ADDR).");
             }
         }
         WalletOp::History { address } => {

@@ -105,7 +105,7 @@ Keystore names resolve anywhere an address is accepted
 
 | Command | What it does |
 |---|---|
-| `node start --mode all\|bootstrap\|dpos\|pbft` | Start nodes (health-waited, pid-tracked). Refuses over an occupied port; per-flag `--port/--p2p-port/--udp-port/--data-dir/--node-id/--bootstrap-nodes` |
+| `node start --mode all\|bootstrap\|dpos\|pbft` | Start nodes (health-waited, pid-tracked). Refuses over an occupied port; per-flag `--port/--p2p-port/--udp-port/--data-dir/--node-id/--bootstrap-nodes/--genesis-dpos/--genesis-pbft` |
 | `node stop --mode …` | SIGTERM (taskkill on Windows) via pidfile |
 | `node status` | process + HTTP health + DPOS/PBFT heights + KDC_STAKED locks |
 | `node logs --node … --lines N --filter x` | Tail node logs with grep filter (`bootstrap\|dpos01\|pbft01`, `dpos`/`pbft` aliases) |
@@ -120,7 +120,7 @@ Keystore names resolve anywhere an address is accepted
 | `config` | Resolved paths and endpoints |
 | `setup [--version] [--from-url] [--build] [--dest]` | Install engine binary, verify `-version` |
 | `doctor` | Binary, ports (serving/free), genesis, data dirs, node health |
-| `compose --dpos N --pbft M` | Render docker-compose.yml for N+M validators (wallets generated) |
+| `compose --dpos N --pbft M` | Render docker-compose.yml for N+M validators (wallets generated). Flags: `--dpos-ids/--pbft-ids/--bootstrap-id/--bootstrap-nodes/--genesis-dpos/--genesis-pbft/--output/--context`; secrets via `.env` (`FAUCET_PRIVATE_KEY`, `GENESIS_MESSAGE`) |
 
 Global flags: `--json` (machine output), `--network testnet|mainnet`,
 `--engine-dir`, `--boot-url`.
