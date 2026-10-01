@@ -20,7 +20,7 @@ From source:
 
 ```bash
 cargo install --path .
-# kdc 0.1.0 in ~/.cargo/bin (rustup must be installed)
+# kdc 0.1.2 in ~/.cargo/bin (rustup must be installed)
 ./install.sh              # Linux: toolchain → release build → install → offline tests
 ```
 

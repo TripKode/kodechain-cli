@@ -1,6 +1,6 @@
 [package]
 name = "kodechain-cli"
-version = "0.1.0"
+version = "0.1.2"
 edition = "2021"
 description = "kdc — CLI for the KodeChain testnet: run nodes, manage wallets, submit transactions (post-quantum: QSH + ML-DSA-65)"
 license = "MIT"
